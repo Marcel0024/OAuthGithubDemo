@@ -1,27 +1,21 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
+﻿using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.OAuth;
 using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.HttpsPolicy;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using OAuthGithubDemo.Data;
+using Microsoft.AspNetCore.Mvc.Authorization;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.AspNetCore.Mvc.Authorization;
 using Microsoft.Extensions.Options;
-using Microsoft.Extensions.Caching.Memory;
-using Microsoft.AspNetCore.Authentication.OAuth;
-using Microsoft.AspNetCore.Authentication;
-using System.Net.Http.Headers;
-using System.Net.Http;
 using Newtonsoft.Json.Linq;
+using System;
+using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Security.Claims;
-using Microsoft.AspNetCore.DataProtection;
+using System.Threading.Tasks;
 
 namespace OAuthGithubDemo
 {
@@ -37,21 +31,7 @@ namespace OAuthGithubDemo
         // This method gets called by the runtime. Use this method to add services to the container.
         public void ConfigureServices(IServiceCollection services)
         {
-            services.Configure<CookiePolicyOptions>(options =>
-            {
-                // This lambda determines whether user consent for non-essential cookies is needed for a given request.
-                options.CheckConsentNeeded = context => false;
-                options.MinimumSameSitePolicy = SameSiteMode.None;
-            });
-
-            services.AddDbContext<ApplicationDbContext>(options =>
-                options.UseSqlServer(
-                    Configuration.GetConnectionString("DefaultConnection")));
-            services.AddDefaultIdentity<IdentityUser>()
-                .AddEntityFrameworkStores<ApplicationDbContext>();
-
             services.AddHttpContextAccessor();
-
             services.AddMemoryCache();
 
             services.AddAuthentication(options =>
@@ -61,7 +41,7 @@ namespace OAuthGithubDemo
 
                 options.DefaultChallengeScheme = "OAuth";
             })
-            .AddOAuth<MyOptions, OAuthHandler<MyOptions>>("OAuth", options =>
+            .AddOAuth("OAuth", options =>
             {
                 // All options are set at runtime by tenant settings
             })
@@ -74,8 +54,8 @@ namespace OAuthGithubDemo
                 options.AccessDeniedPath = "/account/login";
             });
 
-            services.AddScoped<IOptionsMonitor<MyOptions>, MyOptionsMonitor>();
-            services.AddScoped<IConfigureOptions<MyOptions>, ConfigureMyOptions>();
+            services.AddScoped<IOptionsMonitor<OAuthOptions>, MyOptionsMonitor>();
+            services.AddScoped<IConfigureOptions<OAuthOptions>, ConfigureMyOptions>();
 
             services.AddMvc(options => options.Filters.Add(new AuthorizeFilter()))
                 .SetCompatibilityVersion(CompatibilityVersion.Version_2_1);
@@ -109,11 +89,11 @@ namespace OAuthGithubDemo
             });
         }
 
-        public class ConfigureMyOptions : IConfigureNamedOptions<MyOptions>
+        public class ConfigureMyOptions : IConfigureNamedOptions<OAuthOptions>
         {
             private HttpContext _httpContext;
             private IDataProtectionProvider _dataProtectionProvider;
-            private MyOptions myCurrentOptions;
+            private OAuthOptions myCurrentOptions;
 
             public ConfigureMyOptions(IHttpContextAccessor contextAccessor, IDataProtectionProvider dataProtectionProvider)
             {
@@ -121,11 +101,13 @@ namespace OAuthGithubDemo
                 _dataProtectionProvider = dataProtectionProvider;
             }
 
-            public void Configure(string name, MyOptions options)
+            public void Configure(string name, OAuthOptions options)
             {
                 //var tenant = _httpContext.ResolveTenant();
 
                 // in my code i use tenant.Settings for these:
+
+                //options.DataProtectionProvider = _dataProtectionProvider.CreateProtector(tenantId.ToString());
 
                 options.AuthorizationEndpoint = "https://github.com/login/oauth/authorize";
                 options.TokenEndpoint = "https://github.com/login/oauth/access_token";
@@ -156,7 +138,7 @@ namespace OAuthGithubDemo
                 myCurrentOptions = options;
             }
 
-            public void Configure(MyOptions options) => Configure(Options.DefaultName, options);
+            public void Configure(OAuthOptions options) => Configure(Options.DefaultName, options);
 
             private static async Task _onCreatingTicket(OAuthCreatingTicketContext context)
             {
@@ -186,46 +168,31 @@ namespace OAuthGithubDemo
             }
         }
 
-        // Overwritten to by pass validate
-        public class MyOptions : OAuthOptions
-        {
-            public override void Validate()
-            {
-                return;
-            }
-
-            public override void Validate(string scheme)
-            {
-                return;
-            }
-        }
-
-        // TODO caching
-        public class MyOptionsMonitor : IOptionsMonitor<MyOptions>
+        public class MyOptionsMonitor : IOptionsMonitor<OAuthOptions>
         {
             //  private readonly TenantContext<Tenant> _tenantContext;
-            private readonly IOptionsFactory<MyOptions> _optionsFactory;
+            private readonly IOptionsFactory<OAuthOptions> _optionsFactory;
             private readonly IMemoryCache _cache;
 
             public MyOptionsMonitor(
                 //  TenantContext<Tenant> tenantContext,
-                IOptionsFactory<MyOptions> optionsFactory,
-                IMemoryCache cache
-                )
+                IOptionsFactory<OAuthOptions> optionsFactory,
+                IMemoryCache cache)
             {
                 //   _tenantContext = tenantContext;
                 _optionsFactory = optionsFactory;
                 _cache = cache;
             }
 
-            public MyOptions CurrentValue => Get(Options.DefaultName);
+            public OAuthOptions CurrentValue => Get(Options.DefaultName);
 
-            public MyOptions Get(string name)
+            public OAuthOptions Get(string name)
             {
-                return _cache.GetOrCreate($"{name}", abc => _optionsFactory.Create(name));
+                //var key = $"{_tenantContext.Tenant.Id}{name}";
+                return _cache.GetOrCreate($"{name}", cache => _optionsFactory.Create(name));
             }
 
-            public IDisposable OnChange(Action<MyOptions, string> listener)
+            public IDisposable OnChange(Action<OAuthOptions, string> listener)
             {
                 return null;
             }
